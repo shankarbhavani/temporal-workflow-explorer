@@ -1,0 +1,301 @@
+"""
+Workflow controller for triggering Temporal workflows via HTTP endpoints.
+"""
+from datetime import timedelta
+from uuid import uuid4
+from fastapi import APIRouter, HTTPException
+from temporalio.client import (
+    Schedule,
+    ScheduleActionStartWorkflow,
+    ScheduleSpec,
+    ScheduleIntervalSpec,
+    ScheduleState,
+)
+
+from app.temporal.client import get_temporal_client, get_task_queue
+from app.temporal.workflows import LoadProcessingWorkflow
+
+router = APIRouter(prefix="/workflows")
+
+# Fixed schedule ID for the load processing pipeline
+SCHEDULE_ID = "load-processing-pipeline-schedule"
+
+
+@router.post("/load-processing-pipeline")
+async def trigger_load_processing_pipeline() -> dict:
+    """
+    Trigger the complete load processing workflow.
+
+    This endpoint executes the full load processing pipeline:
+    1. Search for loads
+    2. Send email
+    3. Wait for 20 seconds
+    4. Process email
+    5. Extract data
+    6. Update load
+
+    Returns:
+        Dictionary containing workflow_id and results from all stages
+    """
+    try:
+        # Get Temporal client and task queue
+        client = await get_temporal_client()
+        task_queue = get_task_queue()
+
+        # Generate unique workflow ID
+        workflow_id = f"load-processing-pipeline-{uuid4()}"
+
+        # Execute workflow
+        result = await client.execute_workflow(
+            LoadProcessingWorkflow.run,
+            id=workflow_id,
+            task_queue=task_queue,
+        )
+
+        return {
+            "workflow_id": workflow_id,
+            **result
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to execute load processing workflow: {str(e)}"
+        )
+
+
+@router.post("/load-processing-pipeline/schedule/start")
+async def start_load_processing_schedule() -> dict:
+    """
+    Start a scheduled workflow that runs every 5 minutes.
+
+    Creates a Temporal schedule that automatically triggers the load processing
+    workflow every 5 minutes. The workflow will continue running on this schedule
+    until paused or deleted.
+
+    Returns:
+        Dictionary containing schedule_id and confirmation message
+    """
+    try:
+        client = await get_temporal_client()
+        task_queue = get_task_queue()
+
+        # Create the schedule
+        await client.create_schedule(
+            SCHEDULE_ID,
+            Schedule(
+                action=ScheduleActionStartWorkflow(
+                    LoadProcessingWorkflow.run,
+                    id=f"load-processing-{uuid4()}",  # Unique ID for each workflow run
+                    task_queue=task_queue,
+                ),
+                spec=ScheduleSpec(
+                    intervals=[ScheduleIntervalSpec(every=timedelta(minutes=5))]
+                ),
+                state=ScheduleState(
+                    note="Load processing pipeline - runs every 5 minutes"
+                ),
+            ),
+        )
+
+        return {
+            "schedule_id": SCHEDULE_ID,
+            "status": "started",
+            "interval": "5 minutes",
+            "message": "Schedule created successfully. Workflow will run every 5 minutes.",
+        }
+
+    except Exception as e:
+        # Check if schedule already exists
+        if "already exists" in str(e).lower():
+            raise HTTPException(
+                status_code=409,
+                detail=f"Schedule already exists. Use the pause/resume endpoints to manage it, or delete it first."
+            )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create schedule: {str(e)}"
+        )
+
+
+@router.post("/load-processing-pipeline/schedule/pause")
+async def pause_load_processing_schedule() -> dict:
+    """
+    Pause the scheduled workflow.
+
+    The schedule will stop triggering new workflow executions until resumed.
+    Any currently running workflow execution will complete normally.
+
+    Returns:
+        Dictionary containing schedule_id and confirmation message
+    """
+    try:
+        client = await get_temporal_client()
+        handle = client.get_schedule_handle(SCHEDULE_ID)
+
+        await handle.pause(note="Paused via API")
+
+        return {
+            "schedule_id": SCHEDULE_ID,
+            "status": "paused",
+            "message": "Schedule paused successfully. No new workflows will be triggered.",
+        }
+
+    except Exception as e:
+        if "not found" in str(e).lower():
+            raise HTTPException(
+                status_code=404,
+                detail=f"Schedule not found. Create a schedule first using the start endpoint."
+            )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to pause schedule: {str(e)}"
+        )
+
+
+@router.post("/load-processing-pipeline/schedule/resume")
+async def resume_load_processing_schedule() -> dict:
+    """
+    Resume a paused scheduled workflow.
+
+    The schedule will resume triggering workflow executions every 5 minutes.
+
+    Returns:
+        Dictionary containing schedule_id and confirmation message
+    """
+    try:
+        client = await get_temporal_client()
+        handle = client.get_schedule_handle(SCHEDULE_ID)
+
+        await handle.unpause(note="Resumed via API")
+
+        return {
+            "schedule_id": SCHEDULE_ID,
+            "status": "resumed",
+            "message": "Schedule resumed successfully. Workflows will continue running every 5 minutes.",
+        }
+
+    except Exception as e:
+        if "not found" in str(e).lower():
+            raise HTTPException(
+                status_code=404,
+                detail=f"Schedule not found. Create a schedule first using the start endpoint."
+            )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to resume schedule: {str(e)}"
+        )
+
+
+@router.delete("/load-processing-pipeline/schedule")
+async def delete_load_processing_schedule() -> dict:
+    """
+    Delete the scheduled workflow permanently.
+
+    This will stop all future workflow executions. Any currently running
+    workflow execution will complete normally.
+
+    Returns:
+        Dictionary containing schedule_id and confirmation message
+    """
+    try:
+        client = await get_temporal_client()
+        handle = client.get_schedule_handle(SCHEDULE_ID)
+
+        await handle.delete()
+
+        return {
+            "schedule_id": SCHEDULE_ID,
+            "status": "deleted",
+            "message": "Schedule deleted successfully. No more workflows will be triggered.",
+        }
+
+    except Exception as e:
+        if "not found" in str(e).lower():
+            raise HTTPException(
+                status_code=404,
+                detail=f"Schedule not found. It may have already been deleted."
+            )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete schedule: {str(e)}"
+        )
+
+
+@router.get("/load-processing-pipeline/schedule")
+async def get_load_processing_schedule_status() -> dict:
+    """
+    Get the current status and details of the scheduled workflow.
+
+    Returns:
+        Dictionary containing schedule details, state, and configuration
+    """
+    try:
+        client = await get_temporal_client()
+        handle = client.get_schedule_handle(SCHEDULE_ID)
+
+        description = await handle.describe()
+
+        return {
+            "schedule_id": SCHEDULE_ID,
+            "paused": description.schedule.state.paused,
+            "note": description.schedule.state.note,
+            "interval_minutes": 5,
+            "num_actions": description.info.num_actions,
+            "recent_actions": [
+                {
+                    "start_time": action.start_time.isoformat() if action.start_time else None,
+                    "workflow_id": action.action.workflow_id if hasattr(action.action, 'workflow_id') else None,
+                }
+                for action in description.info.recent_actions[:5]
+            ] if description.info.recent_actions else [],
+            "next_action_times": [
+                time.isoformat() for time in description.info.next_action_times[:3]
+            ] if description.info.next_action_times else [],
+        }
+
+    except Exception as e:
+        if "not found" in str(e).lower():
+            raise HTTPException(
+                status_code=404,
+                detail=f"Schedule not found. Create a schedule first using the start endpoint."
+            )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get schedule status: {str(e)}"
+        )
+
+
+@router.post("/load-processing-pipeline/schedule/trigger")
+async def trigger_load_processing_schedule_manually() -> dict:
+    """
+    Manually trigger one workflow execution outside the regular schedule.
+
+    This does not affect the regular scheduled executions. Use this to run
+    the workflow immediately without waiting for the next scheduled time.
+
+    Returns:
+        Dictionary containing schedule_id and confirmation message
+    """
+    try:
+        client = await get_temporal_client()
+        handle = client.get_schedule_handle(SCHEDULE_ID)
+
+        await handle.trigger()
+
+        return {
+            "schedule_id": SCHEDULE_ID,
+            "status": "triggered",
+            "message": "Workflow triggered manually. Check Temporal UI for execution details.",
+        }
+
+    except Exception as e:
+        if "not found" in str(e).lower():
+            raise HTTPException(
+                status_code=404,
+                detail=f"Schedule not found. Create a schedule first using the start endpoint."
+            )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to trigger schedule: {str(e)}"
+        )
