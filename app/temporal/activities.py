@@ -21,6 +21,18 @@ async def send_email_activity() -> str:
     Returns:
         A message indicating the email was sent
     """
+    # Get activity execution information
+    info = activity.info()
+
+    # Log activity execution details
+    activity.logger.info(
+        f"Activity Execution Details - "
+        f"Activity ID: {info.activity_id}, "
+        f"Activity Type: {info.activity_type}, "
+        f"Workflow ID: {info.workflow_id}, "
+        f"Attempt: {info.attempt}"
+    )
+
     activity.logger.info("Calling send email action block endpoint...")
 
     url = f"{API_BASE_URL}/api/v1/tracy/send-email"
@@ -30,9 +42,11 @@ async def send_email_activity() -> str:
             response = await client.post(url, timeout=30.0)
             response.raise_for_status()
             data = response.json()
+            result = data.get("message", "Email sent")
 
             activity.logger.info(f"Email sent successfully: {data}")
-            return data.get("message", "Email sent")
+            activity.logger.info(f"Activity returning result: {result}")
+            return result
 
         except httpx.HTTPError as e:
             activity.logger.error(f"HTTP error occurred: {e}")
@@ -51,6 +65,16 @@ async def load_search_activity() -> List[int]:
     Returns:
         An array of search result IDs
     """
+    # Get activity execution information
+    info = activity.info()
+    activity.logger.info(
+        f"Activity Execution Details - "
+        f"Activity ID: {info.activity_id}, "
+        f"Activity Type: {info.activity_type}, "
+        f"Workflow ID: {info.workflow_id}, "
+        f"Attempt: {info.attempt}"
+    )
+
     activity.logger.info("Calling load search action block endpoint...")
 
     url = f"{API_BASE_URL}/api/v1/tracy/load-search"
@@ -62,6 +86,7 @@ async def load_search_activity() -> List[int]:
             data = response.json()
 
             activity.logger.info(f"Search results loaded: {data}")
+            activity.logger.info(f"Activity returning result: {data}")
             return data
 
         except httpx.HTTPError as e:
@@ -81,6 +106,16 @@ async def process_email_activity() -> str:
     Returns:
         The classification result
     """
+    # Get activity execution information
+    info = activity.info()
+    activity.logger.info(
+        f"Activity Execution Details - "
+        f"Activity ID: {info.activity_id}, "
+        f"Activity Type: {info.activity_type}, "
+        f"Workflow ID: {info.workflow_id}, "
+        f"Attempt: {info.attempt}"
+    )
+
     activity.logger.info("Calling process email action block endpoint...")
 
     url = f"{API_BASE_URL}/api/v1/tracy/process-email"
@@ -90,9 +125,11 @@ async def process_email_activity() -> str:
             response = await client.post(url, timeout=30.0)
             response.raise_for_status()
             data = response.json()
+            result = data.get("result", "classified")
 
             activity.logger.info(f"Email processed: {data}")
-            return data.get("result", "classified")
+            activity.logger.info(f"Activity returning result: {result}")
+            return result
 
         except httpx.HTTPError as e:
             activity.logger.error(f"HTTP error occurred: {e}")
@@ -111,6 +148,16 @@ async def extract_data_activity() -> str:
     Returns:
         The extracted data
     """
+    # Get activity execution information
+    info = activity.info()
+    activity.logger.info(
+        f"Activity Execution Details - "
+        f"Activity ID: {info.activity_id}, "
+        f"Activity Type: {info.activity_type}, "
+        f"Workflow ID: {info.workflow_id}, "
+        f"Attempt: {info.attempt}"
+    )
+
     activity.logger.info("Calling extract data action block endpoint...")
 
     url = f"{API_BASE_URL}/api/v1/tracy/extract-data"
@@ -120,9 +167,11 @@ async def extract_data_activity() -> str:
             response = await client.post(url, timeout=30.0)
             response.raise_for_status()
             data = response.json()
+            result = data.get("data", "extracted data")
 
             activity.logger.info(f"Data extracted: {data}")
-            return data.get("data", "extracted data")
+            activity.logger.info(f"Activity returning result: {result}")
+            return result
 
         except httpx.HTTPError as e:
             activity.logger.error(f"HTTP error occurred: {e}")
@@ -171,6 +220,16 @@ async def update_load_activity() -> str:
     Returns:
         A message indicating the load was updated
     """
+    # Get activity execution information
+    info = activity.info()
+    activity.logger.info(
+        f"Activity Execution Details - "
+        f"Activity ID: {info.activity_id}, "
+        f"Activity Type: {info.activity_type}, "
+        f"Workflow ID: {info.workflow_id}, "
+        f"Attempt: {info.attempt}"
+    )
+
     activity.logger.info("Calling update load action block endpoint...")
 
     url = f"{API_BASE_URL}/api/v1/tracy/update-load"
@@ -180,9 +239,11 @@ async def update_load_activity() -> str:
             response = await client.post(url, timeout=30.0)
             response.raise_for_status()
             data = response.json()
+            result = data.get("message", "load updated")
 
             activity.logger.info(f"Load updated successfully: {data}")
-            return data.get("message", "load updated")
+            activity.logger.info(f"Activity returning result: {result}")
+            return result
 
         except httpx.HTTPError as e:
             activity.logger.error(f"HTTP error occurred: {e}")
