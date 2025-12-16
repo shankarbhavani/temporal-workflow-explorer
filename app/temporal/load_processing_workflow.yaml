@@ -1,0 +1,54 @@
+# Load Processing Workflow - YAML Definition
+# This workflow orchestrates the complete load handling flow:
+# 1. Search for loads
+# 2. Send email
+# 3. Wait for 20 seconds
+# 4. Process email
+# 5. Extract data
+# 6. Update load
+
+variables:
+  workflow_id: ""
+  run_id: ""
+  workflow_type: ""
+  attempt: 0
+
+root:
+  sequence:
+    elements:
+      # Step 1: Search for loads
+      - activity:
+          name: load_search
+          arguments: []
+          result: search_results
+
+      # Step 2: Send email
+      - activity:
+          name: send_email
+          arguments: []
+          result: email_status
+
+      # Step 3: Wait for 20 seconds
+      - activity:
+          name: sleep_activity
+          arguments:
+            - "10"
+          result: sleep_result
+
+      # Step 4: Process email
+      - activity:
+          name: process_email
+          arguments: []
+          result: classification
+
+      # Step 5: Extract data
+      - activity:
+          name: extract_data
+          arguments: []
+          result: extracted_data
+
+      # Step 6: Update load
+      - activity:
+          name: update_load
+          arguments: []
+          result: update_status

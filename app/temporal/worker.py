@@ -6,6 +6,7 @@ from temporalio.worker import Worker
 from dotenv import load_dotenv
 
 from app.temporal.workflows import LoadProcessingWorkflow
+from app.temporal.dsl_workflow import DSLWorkflow
 from app.temporal.activities import (
     send_email_activity,
     load_search_activity,
@@ -14,6 +15,7 @@ from app.temporal.activities import (
     get_escalation_milestones_activity,
     update_load_activity,
     send_escalation_email_activity,
+    sleep_activity,
 )
 
 # Load environment variables
@@ -45,7 +47,7 @@ async def run_worker():
     worker = Worker(
         client,
         task_queue=task_queue,
-        workflows=[LoadProcessingWorkflow],
+        workflows=[LoadProcessingWorkflow, DSLWorkflow],
         activities=[
             send_email_activity,
             load_search_activity,
@@ -54,12 +56,14 @@ async def run_worker():
             get_escalation_milestones_activity,
             update_load_activity,
             send_escalation_email_activity,
+            sleep_activity,
         ],
     )
 
     print(f"Worker started and listening on task queue: {task_queue}")
     print("Registered workflows:")
-    print("  - LoadProcessingWorkflow")
+    print("  - LoadProcessingWorkflow (code-based)")
+    print("  - DSLWorkflow (YAML-based)")
     print("\nRegistered activities:")
     print("  - send_email")
     print("  - load_search")
@@ -68,6 +72,7 @@ async def run_worker():
     print("  - get_escalation_milestones")
     print("  - update_load")
     print("  - send_escalation_email")
+    print("  - sleep_activity")
     print("\nWorker is ready to process tasks. Press Ctrl+C to stop.")
 
     # Run the worker

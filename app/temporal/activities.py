@@ -1,4 +1,5 @@
 """Temporal activities for email processing."""
+import asyncio
 import os
 from typing import List
 import httpx
@@ -281,3 +282,21 @@ async def send_escalation_email_activity() -> str:
         except Exception as e:
             activity.logger.error(f"Error calling send escalation email endpoint: {e}")
             raise
+
+
+@activity.defn(name="sleep_activity")
+async def sleep_activity(seconds: str) -> str:
+    """
+    Sleep activity for workflow delays.
+
+    Args:
+        seconds: Number of seconds to sleep (as string)
+
+    Returns:
+        A message indicating the sleep completed
+    """
+    sleep_time = int(seconds)
+    activity.logger.info(f"Sleeping for {sleep_time} seconds...")
+    await asyncio.sleep(sleep_time)
+    activity.logger.info(f"Sleep completed after {sleep_time} seconds")
+    return f"slept for {sleep_time} seconds"

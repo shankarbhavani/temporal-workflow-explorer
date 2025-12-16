@@ -14,6 +14,8 @@ from temporalio.client import (
 
 from app.temporal.client import get_temporal_client, get_task_queue
 from app.temporal.workflows import LoadProcessingWorkflow
+from app.temporal.dsl_workflow import DSLWorkflow
+from app.temporal.dsl_loader import load_workflow_definition, get_default_workflow_path
 
 router = APIRouter(prefix="/workflows")
 
@@ -24,7 +26,7 @@ SCHEDULE_ID = "load-processing-pipeline-schedule"
 @router.post("/load-processing-pipeline")
 async def trigger_load_processing_pipeline() -> dict:
     """
-    Trigger the complete load processing workflow.
+    Trigger the complete load processing workflow (code-based version).
 
     This endpoint executes the full load processing pipeline:
     1. Search for loads
@@ -61,6 +63,64 @@ async def trigger_load_processing_pipeline() -> dict:
         raise HTTPException(
             status_code=500,
             detail=f"Failed to execute load processing workflow: {str(e)}"
+        )
+
+
+@router.post("/load-processing-pipeline-yaml")
+async def trigger_load_processing_pipeline_yaml() -> dict:
+    """
+    Trigger the complete load processing workflow (YAML-based version).
+
+    This endpoint executes the same load processing pipeline as the code-based version,
+    but the workflow is defined in YAML (app/temporal/load_processing_workflow.yaml).
+
+    The workflow steps are:
+    1. Search for loads
+    2. Send email
+    3. Wait for 20 seconds
+    4. Process email
+    5. Extract data
+    6. Update load
+
+    Returns:
+        Dictionary containing workflow_id and results from all stages
+    """
+    try:
+        # Get Temporal client and task queue
+        client = await get_temporal_client()
+        task_queue = get_task_queue()
+
+        # Load the YAML workflow definition
+        yaml_path = get_default_workflow_path("load_processing_workflow")
+        workflow_input = load_workflow_definition(yaml_path)
+
+        # Generate unique workflow ID
+        workflow_id = f"load-processing-pipeline-yaml-{uuid4()}"
+
+        # Execute DSL workflow with YAML definition
+        result = await client.execute_workflow(
+            DSLWorkflow.run,
+            workflow_input,
+            id=workflow_id,
+            task_queue=task_queue,
+        )
+
+        return {
+            "workflow_id": workflow_id,
+            "workflow_type": "YAML-based DSL",
+            "yaml_definition": yaml_path,
+            **result
+        }
+
+    except FileNotFoundError as e:
+        raise HTTPException(
+            status_code=404,
+            detail=f"YAML workflow definition not found: {str(e)}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to execute YAML-based workflow: {str(e)}"
         )
 
 
