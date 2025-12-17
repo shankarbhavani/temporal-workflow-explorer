@@ -1,0 +1,33 @@
+# Workflow 2: Process Email
+# This workflow processes the email and then triggers Workflow 3
+# for data extraction and load updating
+
+variables:
+  workflow_id: ""
+  run_id: ""
+  classification: ""
+  sleep_result: ""
+  workflow_3_result: ""
+
+root:
+  sequence:
+    elements:
+      # Step 1: Process email
+      - activity:
+          name: process_email
+          arguments: []
+          result: classification
+
+      # Step 2: Wait for 5 seconds
+      - activity:
+          name: sleep_activity
+          arguments:
+            - "5"
+          result: sleep_result
+
+      # Step 3: Trigger Workflow 3
+      - activity:
+          name: start_child_workflow
+          arguments:
+            - "workflow_3_extract_and_update"
+          result: workflow_3_result

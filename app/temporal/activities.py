@@ -300,3 +300,82 @@ async def sleep_activity(seconds: str) -> str:
     await asyncio.sleep(sleep_time)
     activity.logger.info(f"Sleep completed after {sleep_time} seconds")
     return f"slept for {sleep_time} seconds"
+
+
+@activity.defn(name="start_child_workflow")
+async def start_child_workflow_activity(yaml_workflow_name: str) -> dict:
+    """
+    Start a child workflow from a YAML definition.
+
+    This activity triggers another DSL workflow, allowing workflow composition
+    where one workflow can start another workflow.
+
+    Args:
+        yaml_workflow_name: Name of the YAML file (without .yaml extension)
+                          e.g., "workflow_2_process"
+
+    Returns:
+        Dictionary containing the child workflow execution result
+    """
+    from uuid import uuid4
+    from temporalio.client import Client
+    from app.temporal.dsl_loader import load_workflow_definition, get_default_workflow_path
+    from app.temporal.dsl_workflow import DSLWorkflow
+
+    info = activity.info()
+
+    activity.logger.info(
+        f"Starting child workflow from YAML: {yaml_workflow_name} - "
+        f"Parent Workflow ID: {info.workflow_id}"
+    )
+
+    try:
+        # Get Temporal configuration
+        temporal_host = os.getenv("TEMPORAL_HOST", "localhost:7233")
+        temporal_namespace = os.getenv("TEMPORAL_NAMESPACE", "default")
+        task_queue = os.getenv("TEMPORAL_TASK_QUEUE", "email-task-queue")
+
+        # Connect to Temporal
+        client = await Client.connect(
+            temporal_host,
+            namespace=temporal_namespace,
+        )
+
+        # Load the YAML workflow definition
+        yaml_path = get_default_workflow_path(yaml_workflow_name)
+        activity.logger.info(f"Loading workflow from: {yaml_path}")
+
+        workflow_input = load_workflow_definition(yaml_path)
+
+        # Generate unique workflow ID
+        child_workflow_id = f"{yaml_workflow_name}-{uuid4()}"
+
+        activity.logger.info(f"Executing child workflow with ID: {child_workflow_id}")
+
+        # Execute the child workflow
+        result = await client.execute_workflow(
+            DSLWorkflow.run,
+            workflow_input,
+            id=child_workflow_id,
+            task_queue=task_queue,
+        )
+
+        activity.logger.info(
+            f"Child workflow completed successfully - "
+            f"Workflow ID: {child_workflow_id}, "
+            f"Result keys: {list(result.keys())}"
+        )
+
+        return {
+            "child_workflow_id": child_workflow_id,
+            "child_workflow_name": yaml_workflow_name,
+            "child_result": result,
+            "status": "completed"
+        }
+
+    except FileNotFoundError as e:
+        activity.logger.error(f"Workflow YAML file not found: {e}")
+        raise
+    except Exception as e:
+        activity.logger.error(f"Error starting child workflow: {e}")
+        raise

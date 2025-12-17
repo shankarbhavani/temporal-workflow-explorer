@@ -1,0 +1,24 @@
+# Workflow 3: Extract Data and Update Load
+# This workflow extracts data and updates the load status
+# This is the final workflow in the cascade
+
+variables:
+  workflow_id: ""
+  run_id: ""
+  extracted_data: ""
+  update_status: ""
+
+root:
+  sequence:
+    elements:
+      # Step 1: Extract data
+      - activity:
+          name: extract_data
+          arguments: []
+          result: extracted_data
+
+      # Step 2: Update load
+      - activity:
+          name: update_load
+          arguments: []
+          result: update_status

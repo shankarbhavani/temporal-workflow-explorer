@@ -19,8 +19,9 @@ from app.temporal.dsl_loader import load_workflow_definition, get_default_workfl
 
 router = APIRouter(prefix="/workflows")
 
-# Fixed schedule ID for the load processing pipeline
+# Fixed schedule IDs
 SCHEDULE_ID = "load-processing-pipeline-schedule"
+WORKFLOW_1_SCHEDULE_ID = "workflow-1-schedule"
 
 
 @router.post("/load-processing-pipeline")
@@ -121,6 +122,384 @@ async def trigger_load_processing_pipeline_yaml() -> dict:
         raise HTTPException(
             status_code=500,
             detail=f"Failed to execute YAML-based workflow: {str(e)}"
+        )
+
+
+@router.post("/workflow-1")
+async def trigger_workflow_1() -> dict:
+    """
+    Trigger Workflow 1: Load and Email
+
+    This workflow executes:
+    1. load_search - Search for loads
+    2. send_email - Send notification email
+    3. sleep_activity (10 sec) - Wait for processing
+    4. Triggers Workflow 2 automatically
+
+    Returns:
+        Dictionary containing workflow_id and execution results
+    """
+    try:
+        client = await get_temporal_client()
+        task_queue = get_task_queue()
+
+        yaml_path = get_default_workflow_path("workflow_1_load_and_email")
+        workflow_input = load_workflow_definition(yaml_path)
+
+        workflow_id = f"workflow-1-{uuid4()}"
+
+        result = await client.execute_workflow(
+            DSLWorkflow.run,
+            workflow_input,
+            id=workflow_id,
+            task_queue=task_queue,
+        )
+
+        return {
+            "workflow_id": workflow_id,
+            "workflow_name": "Workflow 1: Load and Email",
+            "yaml_definition": yaml_path,
+            **result
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to execute Workflow 1: {str(e)}"
+        )
+
+
+@router.post("/workflow-2")
+async def trigger_workflow_2() -> dict:
+    """
+    Trigger Workflow 2: Process Email
+
+    This workflow executes:
+    1. process_email - Process and classify email
+    2. sleep_activity (5 sec) - Wait before next workflow
+    3. Triggers Workflow 3 automatically
+
+    Returns:
+        Dictionary containing workflow_id and execution results
+    """
+    try:
+        client = await get_temporal_client()
+        task_queue = get_task_queue()
+
+        yaml_path = get_default_workflow_path("workflow_2_process")
+        workflow_input = load_workflow_definition(yaml_path)
+
+        workflow_id = f"workflow-2-{uuid4()}"
+
+        result = await client.execute_workflow(
+            DSLWorkflow.run,
+            workflow_input,
+            id=workflow_id,
+            task_queue=task_queue,
+        )
+
+        return {
+            "workflow_id": workflow_id,
+            "workflow_name": "Workflow 2: Process Email",
+            "yaml_definition": yaml_path,
+            **result
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to execute Workflow 2: {str(e)}"
+        )
+
+
+@router.post("/workflow-3")
+async def trigger_workflow_3() -> dict:
+    """
+    Trigger Workflow 3: Extract Data and Update Load
+
+    This workflow executes:
+    1. extract_data - Extract data from email
+    2. update_load - Update load status
+
+    This is the final workflow in the cascade chain.
+
+    Returns:
+        Dictionary containing workflow_id and execution results
+    """
+    try:
+        client = await get_temporal_client()
+        task_queue = get_task_queue()
+
+        yaml_path = get_default_workflow_path("workflow_3_extract_and_update")
+        workflow_input = load_workflow_definition(yaml_path)
+
+        workflow_id = f"workflow-3-{uuid4()}"
+
+        result = await client.execute_workflow(
+            DSLWorkflow.run,
+            workflow_input,
+            id=workflow_id,
+            task_queue=task_queue,
+        )
+
+        return {
+            "workflow_id": workflow_id,
+            "workflow_name": "Workflow 3: Extract and Update",
+            "yaml_definition": yaml_path,
+            **result
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to execute Workflow 3: {str(e)}"
+        )
+
+
+@router.post("/workflow-1/schedule/start")
+async def start_workflow_1_schedule() -> dict:
+    """
+    Start a scheduled workflow-1 that runs every 10 minutes.
+
+    Creates a Temporal schedule that automatically triggers workflow-1
+    every 10 minutes. This will execute the full cascade:
+    - Workflow 1 → Workflow 2 → Workflow 3
+
+    The workflow will continue running on this schedule until paused or deleted.
+
+    Returns:
+        Dictionary containing schedule_id and confirmation message
+    """
+    try:
+        client = await get_temporal_client()
+        task_queue = get_task_queue()
+
+        # Load workflow definition
+        yaml_path = get_default_workflow_path("workflow_1_load_and_email")
+        workflow_input = load_workflow_definition(yaml_path)
+
+        # Create the schedule
+        await client.create_schedule(
+            WORKFLOW_1_SCHEDULE_ID,
+            Schedule(
+                action=ScheduleActionStartWorkflow(
+                    DSLWorkflow.run,
+                    workflow_input,
+                    id=f"workflow-1-scheduled-{uuid4()}",
+                    task_queue=task_queue,
+                ),
+                spec=ScheduleSpec(
+                    intervals=[ScheduleIntervalSpec(every=timedelta(minutes=10))]
+                ),
+                state=ScheduleState(
+                    note="Workflow-1 cascade - runs every 10 minutes"
+                ),
+            ),
+        )
+
+        return {
+            "schedule_id": WORKFLOW_1_SCHEDULE_ID,
+            "status": "started",
+            "interval": "10 minutes",
+            "message": "Schedule created successfully. Workflow-1 (and cascade) will run every 10 minutes.",
+            "cascade": "Workflow 1 → Workflow 2 → Workflow 3"
+        }
+
+    except Exception as e:
+        # Check if schedule already exists
+        if "already exists" in str(e).lower():
+            raise HTTPException(
+                status_code=409,
+                detail=f"Schedule already exists. Use the pause/resume endpoints to manage it, or delete it first."
+            )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create schedule: {str(e)}"
+        )
+
+
+@router.post("/workflow-1/schedule/pause")
+async def pause_workflow_1_schedule() -> dict:
+    """
+    Pause the scheduled workflow-1.
+
+    The schedule will stop triggering new workflow executions until resumed.
+    Any currently running workflow execution will complete normally.
+
+    Returns:
+        Dictionary containing schedule_id and confirmation message
+    """
+    try:
+        client = await get_temporal_client()
+        handle = client.get_schedule_handle(WORKFLOW_1_SCHEDULE_ID)
+
+        await handle.pause(note="Paused via API")
+
+        return {
+            "schedule_id": WORKFLOW_1_SCHEDULE_ID,
+            "status": "paused",
+            "message": "Schedule paused successfully. No new workflow-1 executions will be triggered.",
+        }
+
+    except Exception as e:
+        if "not found" in str(e).lower():
+            raise HTTPException(
+                status_code=404,
+                detail=f"Schedule not found. Create a schedule first using the start endpoint."
+            )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to pause schedule: {str(e)}"
+        )
+
+
+@router.post("/workflow-1/schedule/resume")
+async def resume_workflow_1_schedule() -> dict:
+    """
+    Resume a paused scheduled workflow-1.
+
+    The schedule will resume triggering workflow executions every 10 minutes.
+
+    Returns:
+        Dictionary containing schedule_id and confirmation message
+    """
+    try:
+        client = await get_temporal_client()
+        handle = client.get_schedule_handle(WORKFLOW_1_SCHEDULE_ID)
+
+        await handle.unpause(note="Resumed via API")
+
+        return {
+            "schedule_id": WORKFLOW_1_SCHEDULE_ID,
+            "status": "resumed",
+            "message": "Schedule resumed successfully. Workflow-1 will continue running every 10 minutes.",
+        }
+
+    except Exception as e:
+        if "not found" in str(e).lower():
+            raise HTTPException(
+                status_code=404,
+                detail=f"Schedule not found. Create a schedule first using the start endpoint."
+            )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to resume schedule: {str(e)}"
+        )
+
+
+@router.delete("/workflow-1/schedule")
+async def delete_workflow_1_schedule() -> dict:
+    """
+    Delete the scheduled workflow-1 permanently.
+
+    This will stop all future workflow executions. Any currently running
+    workflow execution will complete normally.
+
+    Returns:
+        Dictionary containing schedule_id and confirmation message
+    """
+    try:
+        client = await get_temporal_client()
+        handle = client.get_schedule_handle(WORKFLOW_1_SCHEDULE_ID)
+
+        await handle.delete()
+
+        return {
+            "schedule_id": WORKFLOW_1_SCHEDULE_ID,
+            "status": "deleted",
+            "message": "Schedule deleted successfully. No more workflow-1 executions will be triggered.",
+        }
+
+    except Exception as e:
+        if "not found" in str(e).lower():
+            raise HTTPException(
+                status_code=404,
+                detail=f"Schedule not found. It may have already been deleted."
+            )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete schedule: {str(e)}"
+        )
+
+
+@router.get("/workflow-1/schedule")
+async def get_workflow_1_schedule_status() -> dict:
+    """
+    Get the current status and details of the scheduled workflow-1.
+
+    Returns:
+        Dictionary containing schedule details, state, and configuration
+    """
+    try:
+        client = await get_temporal_client()
+        handle = client.get_schedule_handle(WORKFLOW_1_SCHEDULE_ID)
+
+        description = await handle.describe()
+
+        return {
+            "schedule_id": WORKFLOW_1_SCHEDULE_ID,
+            "paused": description.schedule.state.paused,
+            "note": description.schedule.state.note,
+            "interval_minutes": 10,
+            "num_actions": description.info.num_actions,
+            "recent_actions": [
+                {
+                    "start_time": action.start_time.isoformat() if action.start_time else None,
+                    "workflow_id": action.action.workflow_id if hasattr(action.action, 'workflow_id') else None,
+                }
+                for action in description.info.recent_actions[:5]
+            ] if description.info.recent_actions else [],
+            "next_action_times": [
+                time.isoformat() for time in description.info.next_action_times[:3]
+            ] if description.info.next_action_times else [],
+            "cascade": "Workflow 1 → Workflow 2 → Workflow 3"
+        }
+
+    except Exception as e:
+        if "not found" in str(e).lower():
+            raise HTTPException(
+                status_code=404,
+                detail=f"Schedule not found. Create a schedule first using the start endpoint."
+            )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get schedule status: {str(e)}"
+        )
+
+
+@router.post("/workflow-1/schedule/trigger")
+async def trigger_workflow_1_schedule_manually() -> dict:
+    """
+    Manually trigger one workflow-1 execution outside the regular schedule.
+
+    This does not affect the regular scheduled executions. Use this to run
+    the workflow immediately without waiting for the next scheduled time.
+
+    Returns:
+        Dictionary containing schedule_id and confirmation message
+    """
+    try:
+        client = await get_temporal_client()
+        handle = client.get_schedule_handle(WORKFLOW_1_SCHEDULE_ID)
+
+        await handle.trigger()
+
+        return {
+            "schedule_id": WORKFLOW_1_SCHEDULE_ID,
+            "status": "triggered",
+            "message": "Workflow-1 triggered manually. Check Temporal UI for execution details.",
+            "cascade": "Workflow 1 → Workflow 2 → Workflow 3"
+        }
+
+    except Exception as e:
+        if "not found" in str(e).lower():
+            raise HTTPException(
+                status_code=404,
+                detail=f"Schedule not found. Create a schedule first using the start endpoint."
+            )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to trigger schedule: {str(e)}"
         )
 
 

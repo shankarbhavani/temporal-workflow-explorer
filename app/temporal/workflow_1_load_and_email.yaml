@@ -1,0 +1,40 @@
+# Workflow 1: Load and Email
+# This workflow performs initial data loading and email sending,
+# then triggers Workflow 2 for email processing
+
+variables:
+  workflow_id: ""
+  run_id: ""
+  search_results: ""
+  email_status: ""
+  sleep_result: ""
+  workflow_2_result: ""
+
+root:
+  sequence:
+    elements:
+      # Step 1: Search for loads
+      - activity:
+          name: load_search
+          arguments: []
+          result: search_results
+
+      # Step 2: Send email
+      - activity:
+          name: send_email
+          arguments: []
+          result: email_status
+
+      # Step 3: Wait for 10 seconds
+      - activity:
+          name: sleep_activity
+          arguments:
+            - "10"
+          result: sleep_result
+
+      # Step 4: Trigger Workflow 2
+      - activity:
+          name: start_child_workflow
+          arguments:
+            - "workflow_2_process"
+          result: workflow_2_result

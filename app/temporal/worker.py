@@ -16,6 +16,7 @@ from app.temporal.activities import (
     update_load_activity,
     send_escalation_email_activity,
     sleep_activity,
+    start_child_workflow_activity,
 )
 
 # Load environment variables
@@ -57,6 +58,7 @@ async def run_worker():
             update_load_activity,
             send_escalation_email_activity,
             sleep_activity,
+            start_child_workflow_activity,
         ],
     )
 
@@ -73,6 +75,7 @@ async def run_worker():
     print("  - update_load")
     print("  - send_escalation_email")
     print("  - sleep_activity")
+    print("  - start_child_workflow (enables workflow cascade)")
     print("\nWorker is ready to process tasks. Press Ctrl+C to stop.")
 
     # Run the worker
