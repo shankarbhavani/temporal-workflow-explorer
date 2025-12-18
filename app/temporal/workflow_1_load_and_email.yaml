@@ -9,6 +9,17 @@ variables:
   email_status: ""
   sleep_result: ""
   workflow_2_result: ""
+  # Load search configuration
+  shipper_id: "test-qa-demo-shipper"
+  agent_id: "TRACY"
+  date_range_days: 30
+  scac_filter: []
+  mode: ["TL"]
+  # Email configuration
+  template_key: "test-wrapped-action-3"
+  email_subject: "FourKites Alert : Late Load Follow Up"
+  batching_mode: "single"
+  contact_levels: ["is_level_1"]
 
 root:
   sequence:
@@ -16,13 +27,29 @@ root:
       # Step 1: Search for loads
       - activity:
           name: load_search
-          arguments: []
+          arguments:
+            - shipper_id
+            - agent_id
+            - workflow_id
+            - date_range_days
+            - scac_filter
+            - mode
           result: search_results
 
       # Step 2: Send email
+      # Note: search_results is a dict containing loads_by_scac and load_objects
       - activity:
           name: send_email
-          arguments: []
+          arguments:
+            - search_results.loads_by_scac
+            - search_results.load_objects
+            - shipper_id
+            - agent_id
+            - workflow_id
+            - template_key
+            - email_subject
+            - batching_mode
+            - contact_levels
           result: email_status
 
       # Step 3: Wait for 10 seconds

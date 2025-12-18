@@ -7,6 +7,7 @@ from datetime import timedelta
 from typing import Any, Dict, List, Optional, Union
 
 from temporalio import workflow
+from temporalio.common import RetryPolicy
 
 
 @dataclass
@@ -127,6 +128,43 @@ class DSLWorkflow:
         elif isinstance(stmt, ParallelStatement):
             await self.execute_parallel(stmt)
 
+    def resolve_argument(self, arg: str) -> Any:
+        """
+        Resolve argument value, supporting dot notation for nested dictionary access.
+
+        This method handles both simple variable lookups and nested dictionary access
+        using dot notation (e.g., "search_results.loads_by_scac").
+
+        Args:
+            arg: Argument string, either a simple variable name or dot-notated path
+
+        Returns:
+            The resolved value from variables, or the original argument if not found
+
+        Examples:
+            - "shipper_id" -> self.variables["shipper_id"]
+            - "search_results.loads_by_scac" -> self.variables["search_results"]["loads_by_scac"]
+        """
+        # If no dot, do simple variable lookup
+        if "." not in arg:
+            return self.variables.get(arg, arg)
+
+        # Handle nested dictionary access with dot notation
+        keys = arg.split(".")
+        value = self.variables
+
+        for key in keys:
+            if isinstance(value, dict):
+                value = value.get(key)
+                if value is None:
+                    workflow.logger.warning(f"Could not resolve nested path: {arg} (failed at key: {key})")
+                    return arg  # Fallback to original string if path not found
+            else:
+                workflow.logger.warning(f"Could not resolve nested path: {arg} (value at {key} is not a dict)")
+                return arg  # Fallback if intermediate value is not a dict
+
+        return value
+
     async def execute_activity(self, stmt: ActivityStatement) -> None:
         """
         Execute an activity statement.
@@ -138,21 +176,27 @@ class DSLWorkflow:
 
         workflow.logger.info(f"Executing activity: {activity_name}")
 
-        # Load arguments from variables
-        args = [self.variables.get(arg, arg) for arg in stmt.activity.arguments]
+        # Resolve arguments from variables (supports dot notation for nested access)
+        args = [self.resolve_argument(arg) for arg in stmt.activity.arguments]
 
-        # Execute the activity
+        workflow.logger.info(f"Activity arguments resolved: {len(args)} arguments")
+
+        # Execute the activity with extended timeout for external API calls
         result = await workflow.execute_activity(
             activity_name,
             args=args,
-            start_to_close_timeout=timedelta(minutes=1),
+            start_to_close_timeout=timedelta(minutes=5),  # Extended for external API calls
+            retry_policy=RetryPolicy(
+                maximum_attempts=3,  # Limit retries to prevent excessive attempts
+            ),
         )
 
-        workflow.logger.info(f"Activity completed: {activity_name} - Result: {result}")
+        workflow.logger.info(f"Activity completed: {activity_name} - Result type: {type(result).__name__}")
 
         # Store result in variables if specified
         if stmt.activity.result:
             self.variables[stmt.activity.result] = result
+            workflow.logger.info(f"Stored result in variable: {stmt.activity.result}")
 
     async def execute_sequence(self, stmt: SequenceStatement) -> None:
         """

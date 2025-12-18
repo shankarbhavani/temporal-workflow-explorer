@@ -1,7 +1,7 @@
 """Temporal activities for email processing."""
 import asyncio
 import os
-from typing import List
+from typing import List, Dict, Any
 import httpx
 from temporalio import activity
 from dotenv import load_dotenv
@@ -14,18 +14,49 @@ API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 
 
 @activity.defn(name="send_email")
-async def send_email_activity() -> str:
+async def send_email_activity(
+    loads_by_scac: Dict[str, Any],
+    load_objects: Dict[str, Any],
+    shipper_id: str,
+    agent_id: str,
+    workflow_id: str,
+    template_key: str,
+    email_subject: str,
+    batching_mode: str = "single",
+    contact_levels: List[str] = None,
+    template_type: str = "company",
+    connect_from_role: str = "shipper",
+    connect_to_role: str = "carrier",
+    network_identifier_key: str = "scac"
+) -> Dict[str, Any]:
     """
-    Send an email activity.
-    Makes an HTTP call to the business logic endpoint.
+    Send email activity with carrier follow-up logic.
+    Makes an HTTP POST call to the business logic endpoint with email configuration.
+
+    Args:
+        loads_by_scac: Loads grouped by SCAC code (from search results)
+        load_objects: Full load details indexed by load_number (from search results)
+        shipper_id: Shipper identifier
+        agent_id: Agent identifier
+        workflow_id: Workflow identifier
+        template_key: Email template key
+        email_subject: Email subject line
+        batching_mode: Email batching mode (default: "single")
+        contact_levels: Contact levels to target (default: ["is_level_1"])
+        template_type: Template type (default: "company")
+        connect_from_role: Role sending email (default: "shipper")
+        connect_to_role: Role receiving email (default: "carrier")
+        network_identifier_key: Network identifier key (default: "scac")
 
     Returns:
-        A message indicating the email was sent
+        Dictionary containing email sending results and status
     """
+    # Set defaults for mutable arguments
+    if contact_levels is None:
+        contact_levels = ["is_level_1"]
+
     # Get activity execution information
     info = activity.info()
-
-    # Log activity execution details
     activity.logger.info(
         f"Activity Execution Details - "
         f"Activity ID: {info.activity_id}, "
@@ -34,20 +65,42 @@ async def send_email_activity() -> str:
         f"Attempt: {info.attempt}"
     )
 
-    activity.logger.info("Calling send email action block endpoint...")
+    activity.logger.info(
+        f"Calling send email action block endpoint for {len(loads_by_scac)} carriers, "
+        f"template: {template_key}, batching_mode: {batching_mode}"
+    )
 
     url = f"{API_BASE_URL}/api/v1/tracy/send-email"
 
+    # Prepare request payload
+    payload = {
+        "loads_by_scac": loads_by_scac,
+        "load_objects": load_objects,
+        "shipper_id": shipper_id,
+        "agent_id": agent_id,
+        "workflow_id": workflow_id,
+        "template_key": template_key,
+        "email_subject": email_subject,
+        "batching_mode": batching_mode,
+        "contact_levels": contact_levels,
+        "template_type": template_type,
+        "connect_from_role": connect_from_role,
+        "connect_to_role": connect_to_role,
+        "network_identifier_key": network_identifier_key
+    }
+
     async with httpx.AsyncClient() as client:
         try:
-            response = await client.post(url, timeout=30.0)
+            response = await client.post(url, json=payload, timeout=60.0)
             response.raise_for_status()
             data = response.json()
-            result = data.get("message", "Email sent")
 
-            activity.logger.info(f"Email sent successfully: {data}")
-            activity.logger.info(f"Activity returning result: {result}")
-            return result
+            activity.logger.info(
+                f"Email sent successfully: {data.get('successful_emails', 0)} successful, "
+                f"{data.get('failed_emails', 0)} failed, status: {data.get('workflow_status', 'unknown')}"
+            )
+            activity.logger.info(f"Activity returning result with keys: {list(data.keys())}")
+            return data
 
         except httpx.HTTPError as e:
             activity.logger.error(f"HTTP error occurred: {e}")
@@ -58,14 +111,35 @@ async def send_email_activity() -> str:
 
 
 @activity.defn(name="load_search")
-async def load_search_activity() -> List[int]:
+async def load_search_activity(
+    shipper_id: str,
+    agent_id: str,
+    workflow_id: str,
+    date_range_days: int = 30,
+    scac_filter: List[str] = None,
+    mode: List[str] = None
+) -> Dict[str, Any]:
     """
     Load search results activity.
-    Makes an HTTP call to the business logic endpoint.
+    Makes an HTTP POST call to the business logic endpoint with search parameters.
+
+    Args:
+        shipper_id: Shipper identifier
+        agent_id: Agent identifier
+        workflow_id: Workflow identifier
+        date_range_days: Number of days to search back (default: 30)
+        scac_filter: List of SCAC codes to filter by (default: [])
+        mode: Transportation modes (default: ["TL"])
 
     Returns:
-        An array of search result IDs
+        Dictionary containing search results with loads_by_scac, load_objects, etc.
     """
+    # Set defaults for mutable arguments
+    if scac_filter is None:
+        scac_filter = []
+    if mode is None:
+        mode = ["TL"]
+
     # Get activity execution information
     info = activity.info()
     activity.logger.info(
@@ -76,18 +150,34 @@ async def load_search_activity() -> List[int]:
         f"Attempt: {info.attempt}"
     )
 
-    activity.logger.info("Calling load search action block endpoint...")
+    activity.logger.info(
+        f"Calling load search action block endpoint for shipper: {shipper_id}, "
+        f"date_range_days: {date_range_days}"
+    )
 
     url = f"{API_BASE_URL}/api/v1/tracy/load-search"
 
+    # Prepare request payload
+    payload = {
+        "shipper_id": shipper_id,
+        "agent_id": agent_id,
+        "workflow_id": workflow_id,
+        "date_range_days": date_range_days,
+        "scac_filter": scac_filter,
+        "mode": mode
+    }
+
     async with httpx.AsyncClient() as client:
         try:
-            response = await client.get(url, timeout=30.0)
+            response = await client.post(url, json=payload, timeout=60.0)
             response.raise_for_status()
             data = response.json()
 
-            activity.logger.info(f"Search results loaded: {data}")
-            activity.logger.info(f"Activity returning result: {data}")
+            activity.logger.info(
+                f"Search results loaded: Found {data.get('total_loads_found', 0)} loads "
+                f"across {len(data.get('loads_by_scac', {}))} carriers"
+            )
+            activity.logger.info(f"Activity returning result with keys: {list(data.keys())}")
             return data
 
         except httpx.HTTPError as e:

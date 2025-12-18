@@ -3,7 +3,9 @@ Workflow controller for triggering Temporal workflows via HTTP endpoints.
 """
 from datetime import timedelta
 from uuid import uuid4
+from typing import List
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 from temporalio.client import (
     Schedule,
     ScheduleActionStartWorkflow,
@@ -18,6 +20,23 @@ from app.temporal.dsl_workflow import DSLWorkflow
 from app.temporal.dsl_loader import load_workflow_definition, get_default_workflow_path
 
 router = APIRouter(prefix="/workflows")
+
+
+# Pydantic Request Models
+class ExecuteWorkflowRequest(BaseModel):
+    """Request model for executing workflow with custom parameters."""
+    shipper_id: str = Field(default="test-qa-demo-shipper", description="Shipper identifier")
+    agent_id: str = Field(default="TRACY", description="Agent identifier")
+    date_range_days: int = Field(default=30, description="Number of days to search back")
+    email_subject: str = Field(
+        default="FourKites Alert : Late Load Follow Up",
+        description="Email subject line"
+    )
+    template_key: str = Field(default="test-wrapped-action-3", description="Email template key")
+    scac_filter: List[str] = Field(default_factory=list, description="List of SCAC codes to filter")
+    mode: List[str] = Field(default=["TL"], description="Transportation modes")
+    batching_mode: str = Field(default="single", description="Email batching mode")
+    contact_levels: List[str] = Field(default=["is_level_1"], description="Contact levels")
 
 # Fixed schedule IDs
 SCHEDULE_ID = "load-processing-pipeline-schedule"
@@ -122,6 +141,89 @@ async def trigger_load_processing_pipeline_yaml() -> dict:
         raise HTTPException(
             status_code=500,
             detail=f"Failed to execute YAML-based workflow: {str(e)}"
+        )
+
+
+@router.post("/execute-workflow")
+async def execute_workflow_with_params(request: ExecuteWorkflowRequest) -> dict:
+    """
+    Execute workflow with custom parameters.
+
+    This endpoint allows you to trigger the complete workflow cascade (Workflow 1 → 2 → 3)
+    with custom parameters for load search and email configuration.
+
+    The workflow steps are:
+    1. Search for late loads with custom date range and filters
+    2. Send carrier follow-up emails with custom template and subject
+    3. Process email (Workflow 2)
+    4. Extract data and update load (Workflow 3)
+
+    Args:
+        request: ExecuteWorkflowRequest containing custom parameters
+
+    Returns:
+        Dictionary containing workflow_id, parameters used, and results from all stages
+    """
+    try:
+        # Get Temporal client and task queue
+        client = await get_temporal_client()
+        task_queue = get_task_queue()
+
+        # Load the YAML workflow definition (workflow_1 which triggers the cascade)
+        yaml_path = get_default_workflow_path("workflow_1_load_and_email")
+        workflow_input = load_workflow_definition(yaml_path)
+
+        # Override workflow variables with request parameters
+        workflow_input.variables.update({
+            "shipper_id": request.shipper_id,
+            "agent_id": request.agent_id,
+            "date_range_days": request.date_range_days,
+            "scac_filter": request.scac_filter,
+            "mode": request.mode,
+            "template_key": request.template_key,
+            "email_subject": request.email_subject,
+            "batching_mode": request.batching_mode,
+            "contact_levels": request.contact_levels,
+        })
+
+        # Generate unique workflow ID
+        workflow_id = f"custom-workflow-{uuid4()}"
+
+        # Execute DSL workflow with custom parameters
+        result = await client.execute_workflow(
+            DSLWorkflow.run,
+            workflow_input,
+            id=workflow_id,
+            task_queue=task_queue,
+        )
+
+        return {
+            "workflow_id": workflow_id,
+            "workflow_name": "Custom Parameterized Workflow (Full Cascade)",
+            "cascade": "Workflow 1 → Workflow 2 → Workflow 3",
+            "parameters": {
+                "shipper_id": request.shipper_id,
+                "agent_id": request.agent_id,
+                "date_range_days": request.date_range_days,
+                "email_subject": request.email_subject,
+                "template_key": request.template_key,
+                "scac_filter": request.scac_filter,
+                "mode": request.mode,
+                "batching_mode": request.batching_mode,
+                "contact_levels": request.contact_levels,
+            },
+            **result
+        }
+
+    except FileNotFoundError as e:
+        raise HTTPException(
+            status_code=404,
+            detail=f"YAML workflow definition not found: {str(e)}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to execute workflow with custom parameters: {str(e)}"
         )
 
 
